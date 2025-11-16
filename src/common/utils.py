@@ -4,10 +4,17 @@ import math
 import queue
 import cv2
 import threading
+import ctypes
+from ctypes import wintypes
 import numpy as np
 from src.common import config, settings
 from random import random
 
+
+user32 = ctypes.windll.user32
+user32.SetProcessDPIAware()
+
+WINDOW_TITLE_PREFIX = "MapleRoyals"
 
 def run_if_enabled(function):
     """
@@ -224,6 +231,56 @@ def rand_float(start, end):
     assert start < end, 'START must be less than END'
     return (end - start) * random() + start
 
+
+def enum_windows():
+    """Yield (hwnd, title) for all visible top-level windows."""
+    EnumWindows = user32.EnumWindows
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    GetWindowTextW = user32.GetWindowTextW
+    GetWindowTextLengthW = user32.GetWindowTextLengthW
+    IsWindowVisible = user32.IsWindowVisible
+
+    windows = []
+
+    def callback(hwnd, lParam):
+        if not IsWindowVisible(hwnd):
+            return True
+        length = GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return True
+        buff = ctypes.create_unicode_buffer(length + 1)
+        GetWindowTextW(hwnd, buff, length + 1)
+        title = buff.value
+        windows.append((hwnd, title))
+        return True
+
+    EnumWindows(EnumWindowsProc(callback), 0)
+    return windows
+
+
+def get_window_rect_by_prefix(prefix: str = WINDOW_TITLE_PREFIX):
+    """
+    Return rect dict for first visible window whose title starts with prefix.
+    """
+    for hwnd, title in enum_windows():
+        if title.startswith(prefix):
+            rect = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+
+            left = max(0, left)
+            top = max(0, top)
+            width = max(right - left, 1)
+            height = max(bottom - top, 1)
+
+            return {
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+                "title": title,
+            }
+    return None
 
 ##########################
 #       Threading        #

@@ -42,7 +42,7 @@ class Capture:
     displays the minimap in a pop-up window.
     """
 
-    def __init__(self):
+    def __init__(self, window_prefix: str = "MapleRoyals"):
         """Initializes this Capture object's main thread."""
 
         config.capture = self
@@ -55,9 +55,15 @@ class Capture:
         self.window = {
             'left': 0,
             'top': 0,
-            'width': 1366,
+            'width': 1024,
             'height': 768
         }
+
+        self.window_prefix = window_prefix
+        self.window_rect = None  # dict from get_window_rect_by_prefix
+        self.mm_region = None  # (tl_x, tl_y, br_x, br_y)
+        self.mm_width = 0
+        self.mm_height = 0
 
         self.ready = False
         self.calibrated = False
@@ -74,18 +80,22 @@ class Capture:
         """Constantly monitors the player's position and in-game events."""
 
         mss.windows.CAPTUREBLT = 0
+
         while True:
             # Calibrate screen capture
-            handle = user32.FindWindowW(None, 'MapleStory')
-            rect = wintypes.RECT()
-            user32.GetWindowRect(handle, ctypes.pointer(rect))
-            rect = (rect.left, rect.top, rect.right, rect.bottom)
-            rect = tuple(max(0, x) for x in rect)
+            # handle = user32.FindWindowW(None, 'MapleRoyals')
+            # rect = wintypes.RECT()
+            # user32.GetWindowRect(handle, ctypes.pointer(rect))
+            # rect = (rect.left, rect.top, rect.right, rect.bottom)
+            # rect = tuple(max(0, x) for x in rect)
 
-            self.window['left'] = rect[0]
-            self.window['top'] = rect[1]
-            self.window['width'] = max(rect[2] - rect[0], MMT_WIDTH)
-            self.window['height'] = max(rect[3] - rect[1], MMT_HEIGHT)
+            self.window_rect = utils.get_window_rect_by_prefix(self.window_prefix)
+
+            self.window['left'] = self.window_rect['left']
+            self.window['top'] = self.window_rect['top']
+            self.window['width'] = self.window_rect['width']
+            self.window['height'] = self.window_rect['height']
+
 
             # Calibrate by finding the top-left and bottom-right corners of the minimap
             with mss.mss() as self.sct:

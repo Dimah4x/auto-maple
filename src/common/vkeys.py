@@ -7,6 +7,7 @@ import win32api
 from src.common import utils
 from ctypes import wintypes
 from random import random
+import serial
 
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
@@ -174,74 +175,227 @@ user32.SendInput.argtypes = (wintypes.UINT, LPINPUT, ctypes.c_int)
 #################################
 #           Functions           #
 #################################
+#
+# @utils.run_if_enabled
+# def key_down(key):
+#     """
+#     Simulates a key-down action. Can be cancelled by Bot.toggle_enabled.
+#     :param key:     The key to press.
+#     :return:        None
+#     """
+#
+#     key = key.lower()
+#     if key not in KEY_MAP.keys():
+#         print(f"Invalid keyboard input: '{key}'.")
+#     else:
+#         x = Input(type=INPUT_KEYBOARD, ki=KeyboardInput(wVk=KEY_MAP[key]))
+#         user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+#
+#
+# def key_up(key):
+#     """
+#     Simulates a key-up action. Cannot be cancelled by Bot.toggle_enabled.
+#     This is to ensure no keys are left in the 'down' state when the program pauses.
+#     :param key:     The key to press.
+#     :return:        None
+#     """
+#
+#     key = key.lower()
+#     if key not in KEY_MAP.keys():
+#         print(f"Invalid keyboard input: '{key}'.")
+#     else:
+#         x = Input(type=INPUT_KEYBOARD, ki=KeyboardInput(wVk=KEY_MAP[key], dwFlags=KEYEVENTF_KEYUP))
+#         user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+#
+#
+# @utils.run_if_enabled
+# def press(key, n, down_time=0.05, up_time=0.1):
+#     """
+#     Presses KEY N times, holding it for DOWN_TIME seconds, and releasing for UP_TIME seconds.
+#     :param key:         The keyboard input to press.
+#     :param n:           Number of times to press KEY.
+#     :param down_time:   Duration of down-press (in seconds).
+#     :param up_time:     Duration of release (in seconds).
+#     :return:            None
+#     """
+#
+#     for _ in range(n):
+#         key_down(key)
+#         time.sleep(down_time * (0.8 + 0.4 * random()))
+#         key_up(key)
+#         time.sleep(up_time * (0.8 + 0.4 * random()))
+#
+#
+# @utils.run_if_enabled
+# def click(position, button='left'):
+#     """
+#     Simulate a mouse click with BUTTON at POSITION.
+#     :param position:    The (x, y) position at which to click.
+#     :param button:      Either the left or right mouse button.
+#     :return:            None
+#     """
+#
+#     if button not in ['left', 'right']:
+#         print(f"'{button}' is not a valid mouse button.")
+#     else:
+#         if button == 'left':
+#             down_event = win32con.MOUSEEVENTF_LEFTDOWN
+#             up_event = win32con.MOUSEEVENTF_LEFTUP
+#         else:
+#             down_event = win32con.MOUSEEVENTF_RIGHTDOWN
+#             up_event = win32con.MOUSEEVENTF_RIGHTUP
+#         win32api.SetCursorPos(position)
+#         win32api.mouse_event(down_event, position[0], position[1], 0, 0)
+#         win32api.mouse_event(up_event, position[0], position[1], 0, 0)
+#################################
+#     Pico Keyboard Sender      #
+#################################
+
+# Change this to the COM port your Pico appears on (check Device Manager)
+PICO_PORT = "COM4"
+PICO_BAUD = 115200
+
+
+class PicoKeyboard:
+    def __init__(self, port=PICO_PORT, baudrate=PICO_BAUD):
+        self.port = port
+        self.baudrate = baudrate
+        self.ser = None
+        self._connect()
+
+    def _connect(self):
+        try:
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
+            # Allow the Pico a moment to reset / be ready after opening serial
+            time.sleep(2)
+            print(f"[PICO] Connected on {self.port}")
+        except Exception as e:
+            print(f"[PICO] ERROR: Could not open Pico on {self.port} → {e}")
+            self.ser = None
+
+    def _send(self, msg: str):
+        if self.ser is None or not self.ser.is_open:
+            # Try to reconnect once
+            self._connect()
+        if self.ser is None or not self.ser.is_open:
+            # Still failed – don't crash the bot, just skip the command
+            return
+        try:
+            self.ser.write((msg + "\n").encode("utf-8"))
+        except Exception as e:
+            print(f"[PICO] Serial write error: {e}")
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+            self.ser = None
+
+    def down(self, key_name: str):
+        # e.g. DOWN:SPACE
+        self._send(f"DOWN:{key_name}")
+
+    def up(self, key_name: str):
+        # e.g. UP:SPACE
+        self._send(f"UP:{key_name}")
+
+    def tap(self, key_name: str, duration_ms: int):
+        # e.g. TAP:SPACE:50
+        self._send(f"TAP:{key_name}:{duration_ms}")
+
+
+pico = PicoKeyboard()
+
+
+#################################
+#   Key name normalization      #
+#################################
+
+def _normalize_key_name(key: str) -> str:
+    """
+    Convert Auto Maple's key string into a canonical name understood by the Pico.
+
+    Examples:
+        "a"         -> "A"
+        "space"     -> "SPACE"
+        "caps lock" -> "CAPS_LOCK"
+        "page up"   -> "PAGE_UP"
+        "left"      -> "LEFT"
+        "f1"        -> "F1"
+    """
+    key = key.strip().lower()
+    if not key:
+        return ""
+    # Replace spaces with underscore and uppercase
+    return key.replace(" ", "_").upper()
+
+
+#################################
+#         Public API            #
+#################################
+
 @utils.run_if_enabled
 def key_down(key):
     """
-    Simulates a key-down action. Can be cancelled by Bot.toggle_enabled.
-    :param key:     The key to press.
-    :return:        None
+    Simulates a key-down action via the Pico.
+    Can be cancelled by Bot.toggle_enabled (via run_if_enabled).
     """
-
-    key = key.lower()
-    if key not in KEY_MAP.keys():
-        print(f"Invalid keyboard input: '{key}'.")
-    else:
-        x = Input(type=INPUT_KEYBOARD, ki=KeyboardInput(wVk=KEY_MAP[key]))
-        user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+    print("[PICO] key down")
+    name = _normalize_key_name(key)
+    if not name:
+        print(f"[PICO] Invalid key_down('{key}') (empty after normalization)")
+        return
+    pico.down(name)
 
 
 def key_up(key):
     """
-    Simulates a key-up action. Cannot be cancelled by Bot.toggle_enabled.
-    This is to ensure no keys are left in the 'down' state when the program pauses.
-    :param key:     The key to press.
-    :return:        None
+    Simulates a key-up action via the Pico.
+    Not wrapped with run_if_enabled so we don't leave keys held
+    if the bot is disabled mid-press.
     """
-
-    key = key.lower()
-    if key not in KEY_MAP.keys():
-        print(f"Invalid keyboard input: '{key}'.")
-    else:
-        x = Input(type=INPUT_KEYBOARD, ki=KeyboardInput(wVk=KEY_MAP[key], dwFlags=KEYEVENTF_KEYUP))
-        user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+    print("[PICO] key up")
+    name = _normalize_key_name(key)
+    if not name:
+        print(f"[PICO] Invalid key_up('{key}') (empty after normalization)")
+        return
+    pico.up(name)
 
 
 @utils.run_if_enabled
 def press(key, n, down_time=0.05, up_time=0.1):
     """
-    Presses KEY N times, holding it for DOWN_TIME seconds, and releasing for UP_TIME seconds.
-    :param key:         The keyboard input to press.
-    :param n:           Number of times to press KEY.
-    :param down_time:   Duration of down-press (in seconds).
-    :param up_time:     Duration of release (in seconds).
-    :return:            None
+    Presses KEY N times via the Pico, holding it for DOWN_TIME seconds
+    (with a small randomization), and releasing for UP_TIME seconds
+    (also randomized). Matches the behavior of the original implementation.
+
+    KEY is normalized and sent as TAP:<NAME>:<MS>.
     """
+    print("[PICO] Press:")
+    name = _normalize_key_name(key)
+    if not name:
+        print(f"[PICO] Invalid press('{key}') (empty after normalization)")
+        return
 
     for _ in range(n):
-        key_down(key)
-        time.sleep(down_time * (0.8 + 0.4 * random()))
-        key_up(key)
-        time.sleep(up_time * (0.8 + 0.4 * random()))
+        # Mimic original randomness in hold time
+        hold = down_time * (0.8 + 0.4 * random())
+        duration_ms = int(hold * 1000)
+        pico.tap(name, duration_ms)
+
+        # Randomized delay between presses
+        sleep_time = up_time * (0.8 + 0.4 * random())
+        time.sleep(sleep_time)
 
 
-@utils.run_if_enabled
-def click(position, button='left'):
+#################################
+#       Mouse stub              #
+#################################
+
+def click(position, button="left"):
     """
-    Simulate a mouse click with BUTTON at POSITION.
-    :param position:    The (x, y) position at which to click.
-    :param button:      Either the left or right mouse button.
-    :return:            None
+    Mouse clicks are not implemented via Pico in this version.
+    Auto Maple rarely depends on mouse input, but if it does,
+    you can either implement mouse HID on the Pico or reintroduce
+    OS-level mouse events here.
     """
-
-    if button not in ['left', 'right']:
-        print(f"'{button}' is not a valid mouse button.")
-    else:
-        if button == 'left':
-            down_event = win32con.MOUSEEVENTF_LEFTDOWN
-            up_event = win32con.MOUSEEVENTF_LEFTUP
-        else:
-            down_event = win32con.MOUSEEVENTF_RIGHTDOWN
-            up_event = win32con.MOUSEEVENTF_RIGHTUP
-        win32api.SetCursorPos(position)
-        win32api.mouse_event(down_event, position[0], position[1], 0, 0)
-        win32api.mouse_event(up_event, position[0], position[1], 0, 0)
+    print(f"[PICO] click({position}, button='{button}') ignored (not implemented)")

@@ -55,6 +55,7 @@ class Bot(Configurable):
         self.thread = threading.Thread(target=self._main)
         self.thread.daemon = True
 
+
     def start(self):
         """
         Starts this Bot object's thread.
@@ -71,9 +72,9 @@ class Bot(Configurable):
         :return:    None
         """
 
-        print('\n[~] Initializing detection algorithm:\n')
-        model = detection.load_model()
-        print('\n[~] Initialized detection algorithm')
+        # Rune solver disabled: skip loading TensorFlow model
+        print('\n[~] Rune detection disabled (skipping model load)222222\n')
+        model = None  # keep variable for API compatibility if needed
 
         self.ready = True
         config.listener.enabled = True
@@ -96,9 +97,12 @@ class Bot(Configurable):
 
                 # Execute next Point in the routine
                 element = config.routine[config.routine.index]
-                if self.rune_active and isinstance(element, Point) \
-                        and element.location == self.rune_closest_pos:
-                    self._solve_rune(model)
+
+                # Rune solver disabled
+                # if self.rune_active and isinstance(element, Point) \
+                #         and element.location == self.rune_closest_pos:
+                #     self._solve_rune(model)
+
                 element.execute()
                 config.routine.step()
             else:
