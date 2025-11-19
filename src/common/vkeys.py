@@ -339,7 +339,7 @@ def key_down(key):
     Simulates a key-down action via the Pico.
     Can be cancelled by Bot.toggle_enabled (via run_if_enabled).
     """
-    print("[PICO] key down")
+    # print("[PICO]" +f"{key}" "down")
     name = _normalize_key_name(key)
     if not name:
         print(f"[PICO] Invalid key_down('{key}') (empty after normalization)")
@@ -353,7 +353,7 @@ def key_up(key):
     Not wrapped with run_if_enabled so we don't leave keys held
     if the bot is disabled mid-press.
     """
-    print("[PICO] key up")
+    # print("[PICO]" +f"{key}" "up")
     name = _normalize_key_name(key)
     if not name:
         print(f"[PICO] Invalid key_up('{key}') (empty after normalization)")
@@ -370,7 +370,7 @@ def press(key, n, down_time=0.05, up_time=0.1):
 
     KEY is normalized and sent as TAP:<NAME>:<MS>.
     """
-    print("[PICO] Press:")
+    print("[PICO] Press: "+f"{key}")
     name = _normalize_key_name(key)
     if not name:
         print(f"[PICO] Invalid press('{key}') (empty after normalization)")

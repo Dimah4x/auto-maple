@@ -3,8 +3,9 @@
 from src.common import config, settings, utils
 import csv
 from os.path import splitext, basename
-from src.routine.components import Point, Label, Jump, Setting, Command, SYMBOLS
+from src.routine.components import Label, Jump, Setting, Command, SYMBOLS
 from src.routine.layout import Layout
+from src.routine.components import Point
 
 
 def update(func):
@@ -41,6 +42,9 @@ class Routine:
         self.index = 0
         self.sequence = []
         self.display = []       # Updated alongside sequence
+        # NEW:
+        self.direction = 1  # for ping-pong (+1 forward, -1 backward)
+        self.traversal_mode = 'auto'  # 'auto' | 'circular' | 'pingpong'
 
     @dirty
     @update
@@ -157,9 +161,37 @@ class Routine:
 
     @utils.run_if_enabled
     def step(self):
-        """Increments config.seq_index and wraps back to 0 at the end of config.sequence."""
+        """
+        Advance the routine index according to traversal_mode:
+        - 'circular': 0 → 1 → ... → N-1 → 0 → ...
+        - 'pingpong': 0 → 1 → ... → N-2 → N-1 → N-2 → ... → 1 → 0 → ...
+        - 'auto': decided at load-time by _auto_select_traversal_mode()
+        """
 
-        self.index = (self.index + 1) % len(self.sequence)
+        n = len(self.sequence)
+        if n == 0:
+            return
+
+        mode = self.traversal_mode
+
+        if mode == 'pingpong':
+            if n == 1:
+                self.index = 0
+                self.direction = 1
+                return
+
+            self.index += self.direction
+
+            if self.index >= n:
+                self.index = n - 1
+                self.direction = -1
+            elif self.index < 0:
+                self.index = 0
+                self.direction = 1
+
+        else:
+            # 'circular' or anything unexpected → fallback to classic behavior
+            self.index = (self.index + 1) % n
 
     def save(self, file_path):
         """Encodes and saves the current Routine at location PATH."""
@@ -224,9 +256,14 @@ class Routine:
         self.dirty = False
         self.path = file
         config.layout = Layout.load(file)
+
+        # NEW: choose traversal mode based on point spacing
+        self._auto_select_traversal_mode()
+
         config.gui.view.status.set_routine(basename(file))
         config.gui.edit.minimap.draw_default()
         print(f" ~  Finished loading routine '{basename(splitext(file)[0])}'.")
+        print(f" ~  Traversal mode: {self.traversal_mode}")
 
     def compile(self, file):
         self.labels = {}
@@ -245,6 +282,62 @@ class Routine:
                         if isinstance(result, Point):
                             curr_point = result
                 line += 1
+
+    def _auto_select_traversal_mode(self):
+        """
+        Decide whether to run the routine in circular or ping-pong mode.
+
+        Heuristic:
+        - Gather all Points in order.
+        - Compute average distance between consecutive points.
+        - Compare last→first distance to this average.
+          If the last→first jump is much bigger (e.g. > 2x), use ping-pong.
+          Otherwise, use circular.
+        """
+
+        points = [c for c in self.sequence if isinstance(c, Point)]
+        if len(points) < 3:
+            # Too few points to care – keep simple circular
+            self.traversal_mode = 'circular'
+            self.direction = 1
+            return
+
+        # distances between consecutive points
+        dists = []
+        for a, b in zip(points[:-1], points[1:]):
+            d = utils.distance(a.location, b.location)
+            if d > 0:
+                dists.append(d)
+
+        if not dists:
+            self.traversal_mode = 'circular'
+            self.direction = 1
+            return
+
+        avg_step = sum(dists) / len(dists)
+
+        # distance from last point back to first
+        loop_dist = utils.distance(points[-1].location, points[0].location)
+        self.traversal_mode = 'pingpong' #forece ping-pong
+        # Heuristic: if the “loop” jump is huge, prefer ping-pong
+        # if loop_dist > 2.0 * avg_step:
+        #     self.traversal_mode = 'pingpong'
+        #     self.direction = 1
+        # else:
+        #     self.traversal_mode = 'circular'
+        #     self.direction = 1
+
+    def set_traversal_mode(self, mode: str):
+        """
+        Manually override traversal mode.
+        mode ∈ {'circular', 'pingpong', 'auto'}
+        """
+        mode = mode.lower()
+        if mode in ('circular', 'pingpong', 'auto'):
+            self.traversal_mode = mode
+            self.direction = 1
+            if mode == 'auto':
+                self._auto_select_traversal_mode()
 
     def _eval(self, row, i):
         if row and isinstance(row, list):

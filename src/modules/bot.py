@@ -8,14 +8,14 @@ import inspect
 import importlib
 import traceback
 from os.path import splitext, basename
-from src.common import config, utils
 from src.detection import detection
 from src.routine import components
 from src.routine.routine import Routine
 from src.command_book.command_book import CommandBook
-from src.routine.components import Point
 from src.common.vkeys import press, click
 from src.common.interfaces import Configurable
+from src.common import config, utils, settings
+from src.routine.components import Point
 
 
 # The rune's buff icon
@@ -66,6 +66,24 @@ class Bot(Configurable):
         print('\n[~] Started main bot loop')
         self.thread.start()
 
+    def _move_towards(self, point: Point):
+        """
+        Move directly towards the target point (straight-line), using the
+        movement primitives defined in the command book.
+        """
+
+        try:
+            move_cmd = self.command_book['move']
+            adjust_cmd = self.command_book['adjust']
+        except KeyError:
+            # If movement commands aren't defined, do nothing
+            return
+
+        x, y = point.location
+        # Straight-line movement: just tell the movement commands to go to (x, y)
+        move_cmd(x, y).execute()
+        adjust_cmd(x, y).execute()
+
     def _main(self):
         """
         The main body of Bot that executes the user's routine.
@@ -92,19 +110,38 @@ class Bot(Configurable):
                     last_fed = now
 
                 # Highlight the current Point
-                config.gui.view.routine.select(config.routine.index)
-                config.gui.view.details.display_info(config.routine.index)
+                # config.gui.view.routine.select(config.routine.index)
+                # config.gui.view.details.display_info(config.routine.index)
 
-                # Execute next Point in the routine
                 element = config.routine[config.routine.index]
 
-                # Rune solver disabled
-                # if self.rune_active and isinstance(element, Point) \
-                #         and element.location == self.rune_closest_pos:
-                #     self._solve_rune(model)
+                if isinstance(element, Point):
+                    player_pos = getattr(config, "player_pos", None)
+                    target = element.location  # (x, y) on minimap
 
-                element.execute()
-                config.routine.step()
+                    if getattr(config, "capture", None) is not None \
+                            and config.capture.ready \
+                            and player_pos is not None:
+
+                        dist = utils.distance(player_pos, target)
+
+                        # A bit larger than move_tolerance so we don't require dead-center
+                        arrival_radius = settings.move_tolerance * 2
+
+                        if dist > arrival_radius*2:
+                            # Not there yet → move straight toward the point
+                            self._move_towards(element)
+                            continue
+
+                    # Close enough → execute node (attacks etc.) and advance routine
+                    element.execute()
+                    config.routine.step()
+
+                else:
+                    # Non-Point (Jump/Label/Setting/etc.)
+                    element.execute()
+                    config.routine.step()
+
             else:
                 time.sleep(0.01)
 
